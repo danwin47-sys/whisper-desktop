@@ -1,12 +1,34 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and output
 error_log.txt
 transcription_log.txt
 transcription_stats.csv
+
+# Media files
 *.mp3
-*.mp4
 *.wav
+*.mp4
+*.avi
 *.srt
-whisper_settings.json
-.vscode/
+
+# Models (if downloaded locally)
+models/
+
+# OS
+.DS_Store
+Thumbs.db

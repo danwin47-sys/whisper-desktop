@@ -26,6 +26,44 @@ from utils import split_into_segments, write_srt
 from logging_utils import log_error, log_transcription_stats
 
 
+# === 共用輔助函數 ===
+def _prepare_transcription_params(include_word_timestamps=False):
+    """
+    準備 Whisper 轉錄參數（消除重複代碼）
+    
+    Args:
+        include_word_timestamps: 是否包含單字級別時間戳（需要 VAD 支援）
+    
+    Returns:
+        dict: 轉錄參數字典
+    """
+    # 溫度處理
+    temp = Config.TEMPERATURE
+    if temp is None or not isinstance(temp, (int, float)):
+        temp = 0.0
+    
+    # 基礎參數
+    params = {
+        "beam_size": Config.BEAM_SIZE,
+        "initial_prompt": Config.INITIAL_PROMPT,
+        "language": Config.LANGUAGE,
+        "task": Config.TASK,
+        "temperature": temp,
+        "vad_filter": Config.VAD_ENABLED,
+        "condition_on_previous_text": Config.CONDITION_ON_PREVIOUS_TEXT
+    }
+    
+    # 只有在啟用 VAD 時才添加 VAD 參數
+    if Config.VAD_ENABLED:
+        params["vad_parameters"] = Config.get_vad_parameters()
+    
+    # 加入單字時間戳（如需要）
+    if include_word_timestamps:
+        params["word_timestamps"] = Config.VAD_ENABLED
+    
+    return params
+
+
 class LiveTranscriptionWorker(QThread):
     """即時轉錄 Worker（已整合進階優化）"""
     text_updated = pyqtSignal(str) 
@@ -149,25 +187,10 @@ class LiveTranscriptionWorker(QThread):
         - 使用條件文本控制
         """
         try:
-            # 溫度處理
-            temp = Config.TEMPERATURE
-            if temp is None or not isinstance(temp, (int, float)):
-                temp = 0.0
+            # 使用共用函數準備參數
+            params = _prepare_transcription_params()
             
-            # 使用完整 VAD 參數
-            vad_params = Config.get_vad_parameters()
-            
-            segments, info = self.model.transcribe(
-                audio_data, 
-                beam_size=Config.BEAM_SIZE,
-                initial_prompt=Config.INITIAL_PROMPT, 
-                language=Config.LANGUAGE,
-                task=Config.TASK,
-                temperature=temp,
-                vad_filter=Config.VAD_ENABLED,
-                vad_parameters=vad_params,  # 完整 VAD 參數
-                condition_on_previous_text=Config.CONDITION_ON_PREVIOUS_TEXT  # 條件控制
-            )
+            segments, info = self.model.transcribe(audio_data, **params)
             result = " ".join([seg.text for seg in segments]).strip()
             return result
         except Exception as e:
@@ -194,6 +217,7 @@ class FileTranscriptionWorker(QThread):
     """檔案轉錄 Worker（已整合批次處理優化）"""
     progress_updated = pyqtSignal(int, int)
     file_status_updated = pyqtSignal(str, str)
+    time_estimate_updated = pyqtSignal(str)  # 新增：預估時間信號
     finished_all = pyqtSignal()
 
     def __init__(self, file_paths, model_size="tiny", preloaded_model=None):
@@ -201,6 +225,7 @@ class FileTranscriptionWorker(QThread):
         self.file_paths = file_paths
         self.model_size = model_size
         self.model = preloaded_model
+        self.should_stop = False  # 新增：停止標誌
 
     def run(self):
         """執行檔案轉錄（使用批次處理）"""
@@ -219,18 +244,18 @@ class FileTranscriptionWorker(QThread):
                     try:
                         model = BatchedInferencePipeline(model=base_model)
                         use_batched = True
-                        print(f"✅ 使用批次處理模式 (batch_size={Config.BATCH_SIZE})")
+                        print(f"[OK] 使用批次處理模式 (batch_size={Config.BATCH_SIZE})")
                     except Exception as e:
                         model = base_model
                         use_batched = False
-                        print(f"⚠️ 批次處理初始化失敗，使用標準模式: {e}")
+                        print(f"[WARN] 批次處理初始化失敗，使用標準模式: {e}")
                 else:
                     model = base_model
                     use_batched = False
                     if not Config.VAD_ENABLED:
-                        print("ℹ️ VAD 未啟用，使用標準模式（批次處理需要 VAD）")
+                        print("[INFO] VAD 未啟用，使用標準模式（批次處理需要 VAD）")
                     else:
-                        print("ℹ️ BatchedInferencePipeline 不可用，使用標準模式")
+                        print("[INFO] BatchedInferencePipeline 不可用，使用標準模式")
                     
             except Exception as e:
                 error_msg = f"模型載入失敗: {e}\n{traceback.format_exc()}"
@@ -242,50 +267,23 @@ class FileTranscriptionWorker(QThread):
             use_batched = False
 
         for i, file_path in enumerate(self.file_paths, start=1):
+            # 檢查是否應該停止
+            if self.should_stop:
+                self.file_status_updated.emit(file_path, "已取消")
+                break
+                
             self.progress_updated.emit(i, len(self.file_paths))
             self.file_status_updated.emit(file_path, "轉錄中...")
             
             start_time = time.time()
             try:
-                # 溫度處理
-                temp = Config.TEMPERATURE
-                if temp is None or not isinstance(temp, (int, float)):
-                    temp = 0.0
-                
-                # 使用完整 VAD 參數
-                vad_params = Config.get_vad_parameters()
-                
-                # 準備轉錄參數
-                # 注意：word_timestamps 需要 VAD 或 clip_timestamps 支援
-                # 當 VAD 停用時，使用 segment 級別的時間戳
-                use_word_timestamps = Config.VAD_ENABLED
-                
-                transcribe_params = {
-                    "beam_size": Config.BEAM_SIZE,
-                    "initial_prompt": Config.INITIAL_PROMPT,
-                    "language": Config.LANGUAGE,
-                    "task": Config.TASK,
-                    "temperature": temp,
-                    "word_timestamps": use_word_timestamps,
-                    "vad_filter": Config.VAD_ENABLED,
-                    "condition_on_previous_text": Config.CONDITION_ON_PREVIOUS_TEXT
-                }
-                
-                # 只有在啟用 VAD 時才傳遞 VAD 參數
-                if Config.VAD_ENABLED:
-                    transcribe_params["vad_parameters"] = vad_params
+                # 使用共用函數準備基礎參數
+                transcribe_params = _prepare_transcription_params(include_word_timestamps=True)
                 
                 # 如果使用批次處理，加入 batch_size
-                # 注意：批次處理在某些情況下也需要 clip_timestamps，所以只在 VAD 啟用時使用
                 if use_batched and Config.VAD_ENABLED:
                     transcribe_params["batch_size"] = Config.BATCH_SIZE
                 
-                # === DEBUG: 打印實際參數 ===
-                print("=" * 40)
-                print(f"DEBUG: VAD_ENABLED (Config) = {Config.VAD_ENABLED}")
-                print(f"DEBUG: use_word_timestamps = {use_word_timestamps}")
-                print(f"DEBUG: transcribe_params = {transcribe_params}")
-                print("=" * 40)
                 
                 # 轉錄
                 try:
@@ -301,7 +299,7 @@ class FileTranscriptionWorker(QThread):
                             f"2. 在「設定」分頁中，勾選「啟用 VAD」（需要安裝 onnxruntime）\n"
                             f"\n建議使用方案 1（將 Temperature 改為 0.2）"
                         )
-                        print(f"❌ {error_msg}")
+                        print(f"[ERROR] {error_msg}")
                         log_error(error_msg)
                         self.file_status_updated.emit(
                             file_path, 
@@ -315,7 +313,8 @@ class FileTranscriptionWorker(QThread):
                 all_words = []
                 optimized_segments = []
                 
-                if use_word_timestamps:
+                # 只有在 VAD 啟用時才使用單字級別時間戳
+                if Config.VAD_ENABLED and use_batched:
                     # VAD 啟用：使用單字級別處理
                     for segment in segments:
                         if segment.words:
@@ -338,17 +337,22 @@ class FileTranscriptionWorker(QThread):
                 srt_path = f"{base_name}.srt"
                 write_srt(optimized_segments, srt_path)
                 
-                # 顯示完整路徑和片段數量
-                self.file_status_updated.emit(file_path, f"完成! 字幕已儲存: {srt_path} (共 {len(optimized_segments)} 個片段)")
-
-                
+                # 計算轉錄時間
                 end_time = time.time()
                 duration = end_time - start_time
+                
+                # 顯示完整路徑、片段數量和轉錄時間
+                time_str = f"{duration:.1f}秒" if duration < 60 else f"{duration/60:.1f}分鐘"
+                self.file_status_updated.emit(
+                    file_path, 
+                    f"[OK] 完成! (耗時: {time_str}, {len(optimized_segments)} 個片段)"
+                )
+                
                 log_transcription_stats(file_path, duration, self.model_size)
                 
             except Exception as e:
                 error_msg = f"檔案轉錄失敗 ({file_path}): {e}\n{traceback.format_exc()}"
                 log_error(error_msg)
-                self.file_status_updated.emit(file_path, f"失敗: {e}")
+                self.file_status_updated.emit(file_path, f"[ERROR] 失敗: {e}")
         
         self.finished_all.emit()

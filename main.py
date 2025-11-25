@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self.overlay = SubtitleOverlay()
         self.live_worker = None
         self.file_worker = None
+        self.file_transcription_running = False  # 新增：追蹤檔案轉錄狀態
         
         # 介面佈局
         central_widget = QWidget()
@@ -116,11 +117,27 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(settings_layout)
         
-        # 控制按鈕
+        # 控制按鈕（添加視覺反饋效果）
         self.btn_live_toggle = QPushButton("開始即時轉錄 (F2)")
         self.btn_live_toggle.setCheckable(True)
         self.btn_live_toggle.clicked.connect(self.toggle_live_transcription)
-        self.btn_live_toggle.setStyleSheet("background-color: #4CAF50; color: white; font-size: 16px; padding: 10px;")
+        # 添加 hover 和 pressed 效果
+        self.btn_live_toggle.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 16px;
+                padding: 10px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+        """)
         layout.addWidget(self.btn_live_toggle)
         
         # 浮動視窗開關
@@ -178,11 +195,65 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         layout.addWidget(self.progress_bar)
         
-        # 開始按鈕
-        self.btn_file_start = QPushButton("開始批次轉錄 (已優化)")
+        # 預估時間、總時間顯示
+        self.lbl_time_estimate = QLabel("預估時間: --")
+        self.lbl_time_estimate.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_time_estimate.setStyleSheet("color: #666; font-size: 12px; padding: 5px;")
+        layout.addWidget(self.lbl_time_estimate)
+        
+        # 按鈕區（開始/停止）
+        btn_control_layout = QHBoxLayout()
+        
+        # 開始按鈕（添加視覺反饋效果）
+        self.btn_file_start = QPushButton("▶ 開始批次轉錄")
         self.btn_file_start.clicked.connect(self.start_file_transcription)
-        self.btn_file_start.setStyleSheet("background-color: #2196F3; color: white; font-size: 16px; padding: 10px;")
-        layout.addWidget(self.btn_file_start)
+        self.btn_file_start.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-size: 16px;
+                padding: 10px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #0D47A1;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
+        btn_control_layout.addWidget(self.btn_file_start)
+        
+        # 停止按鈕
+        self.btn_file_stop = QPushButton("⏹ 停止轉錄")
+        self.btn_file_stop.clicked.connect(self.stop_file_transcription)
+        self.btn_file_stop.setEnabled(False)
+        self.btn_file_stop.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                font-size: 16px;
+                padding: 10px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:pressed {
+                background-color: #B71C1C;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
+        btn_control_layout.addWidget(self.btn_file_stop)
+        
+        layout.addLayout(btn_control_layout)
         
         self.tabs.addTab(tab, "檔案轉錄")
 
@@ -304,16 +375,46 @@ class MainWindow(QMainWindow):
                 self.live_worker.start()
             
             self.live_worker.start_recording()
-            self.btn_live_toggle.setText("停止錄音 (F2)")
-            self.btn_live_toggle.setStyleSheet("background-color: #F44336; color: white; font-size: 16px; padding: 10px;")
+            self.btn_live_toggle.setText("⏹ 停止錄音 (F2)")
+            self.btn_live_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #F44336;
+                    color: white;
+                    font-size: 16px;
+                    padding: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #D32F2F;
+                }
+                QPushButton:pressed {
+                    background-color: #B71C1C;
+                }
+            """)
             if self.chk_overlay.isChecked(): 
                 self.overlay.show()
         else:
             # 停止
             if self.live_worker:
                 self.live_worker.stop_recording()
-            self.btn_live_toggle.setText("開始即時轉錄 (F2)")
-            self.btn_live_toggle.setStyleSheet("background-color: #4CAF50; color: white; font-size: 16px; padding: 10px;")
+            self.btn_live_toggle.setText("▶ 開始即時轉錄 (F2)")
+            self.btn_live_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    font-size: 16px;
+                    padding: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+                QPushButton:pressed {
+                    background-color: #3d8b40;
+                }
+            """)
 
     def add_files(self):
         """加入檔案"""
@@ -335,6 +436,49 @@ class MainWindow(QMainWindow):
                         item.setData(Qt.ItemDataRole.UserRole, full_path)
                         self.list_files.addItem(item)
 
+    def estimate_transcription_time(self, files):
+        """預估轉錄時間（基於歷史記錄）"""
+        try:
+            import csv
+            stats_file = "transcription_stats.csv"
+            
+            if not os.path.exists(stats_file):
+                return None
+            
+            # 讀取歷史記錄
+            total_duration = 0
+            count = 0
+            
+            with open(stats_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('model') == self.file_model_combo.currentText():
+                        try:
+                            total_duration += float(row['duration'])
+                            count += 1
+                        except (ValueError, KeyError):
+                            continue
+            
+            if count == 0:
+                return None
+            
+            # 計算平均每檔案時間
+            avg_time = total_duration / count
+            estimated_total = avg_time * len(files)
+            
+            # 格式化時間
+            if estimated_total < 60:
+                return f"{estimated_total:.0f}秒"
+            elif estimated_total < 3600:
+                return f"{estimated_total/60:.1f}分鐘"
+            else:
+                hours = int(estimated_total // 3600)
+                minutes = int((estimated_total % 3600) // 60)
+                return f"{hours}小時{minutes}分鐘"
+        except Exception as e:
+            print(f"預估時間失敗: {e}")
+            return None
+    
     def start_file_transcription(self):
         """開始檔案轉錄（使用優化後的 Worker）"""
         count = self.list_files.count()
@@ -352,13 +496,31 @@ class MainWindow(QMainWindow):
         # 取得使用者在檔案分頁選擇的模型
         selected_model = self.file_model_combo.currentText()
         
+        # 預估時間
+        estimated_time = self.estimate_transcription_time(files)
+        if estimated_time:
+            self.lbl_time_estimate.setText(f"預估總時間: {estimated_time}")
+        else:
+            self.lbl_time_estimate.setText("預估時間: 無歷史記錄")
+        
+        # 更新按鈕狀態
         self.btn_file_start.setEnabled(False)
+        self.btn_file_stop.setEnabled(True)
+        self.file_transcription_running = True
+        
         # 使用優化後的 FileTranscriptionWorker（已整合批次處理）
         self.file_worker = FileTranscriptionWorker(files, model_size=selected_model)
         self.file_worker.progress_updated.connect(lambda c, t: self.progress_bar.setValue(int(c/t*100)))
         self.file_worker.file_status_updated.connect(self.update_file_status)
         self.file_worker.finished_all.connect(self.on_file_transcription_finished)
         self.file_worker.start()
+    
+    def stop_file_transcription(self):
+        """停止檔案轉錄"""
+        if self.file_worker and self.file_transcription_running:
+            self.file_worker.should_stop = True
+            self.btn_file_stop.setEnabled(False)
+            self.lbl_time_estimate.setText("ℹ️ 正在停止...")
 
     def update_file_status(self, file_path, status):
         """更新檔案狀態"""
@@ -383,15 +545,39 @@ class MainWindow(QMainWindow):
     def on_file_transcription_finished(self):
         """檔案轉錄完成"""
         self.btn_file_start.setEnabled(True)
-        QMessageBox.information(self, "完成", "所有檔案轉錄完成！")
+        self.btn_file_stop.setEnabled(False)
+        self.file_transcription_running = False
+        
+        if self.file_worker and self.file_worker.should_stop:
+            self.lbl_time_estimate.setText("❌ 已取消轉錄")
+            QMessageBox.information(self, "已取消", "檔案轉錄已被中斷！")
+        else:
+            self.lbl_time_estimate.setText("✅ 所有檔案轉錄完成")
+            QMessageBox.information(self, "完成", "所有檔案轉錄完成！")
 
     def closeEvent(self, event):
-        """關閉事件處理"""
-        if self.tray.isVisible():
-            self.hide()
-            event.ignore()
-        else:
-            event.accept()
+        """關閉事件處理 - 確保正確清理所有資源"""
+        # 不再使用托盤隱藏，直接關閉程式
+        # 停止所有 worker 線程
+        if self.live_worker:
+            self.live_worker.stop()
+            self.live_worker.wait(2000)  # 等待最多2秒
+            
+        if self.file_worker and self.file_worker.isRunning():
+            self.file_worker.terminate()
+            self.file_worker.wait(2000)
+        
+        # 隱藏托盤圖示
+        if self.tray:
+            self.tray.hide()
+        
+        # 隱藏字幕浮動視窗
+        if self.overlay:
+            self.overlay.close()
+        
+        event.accept()
+        # 確保應用程式完全退出
+        QApplication.instance().quit()
 
 
 # === 全域異常處理 ===

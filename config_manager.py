@@ -17,13 +17,13 @@ class ConfigManager:
         "language": "zh",
         "beam_size": 1,
         "batch_size": 16,
-        "vad_enabled": True,
+        "vad_enabled": False,
         "vad_min_silence_ms": 300,
         "vad_threshold": 0.5,
         "vad_min_speech_ms": 250,
         "vad_speech_pad_ms": 400,
         "condition_on_previous_text": False,
-        "temperature": 0.0
+        "temperature": 0.2
     }
     
     @classmethod

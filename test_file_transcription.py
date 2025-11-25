@@ -20,17 +20,18 @@ def on_status(file_path, status):
 
 def on_finished():
     """轉錄完成"""
-    print("\n✅ 所有檔案轉錄完成！")
+    print("\n[OK] 所有檔案轉錄完成！")
     QCoreApplication.quit()
 
 def main():
     """主測試函數"""
-    # 指定要轉錄的檔案
-    file_path = r"C:\Users\judy\Desktop\test\video1.mp4"
+    # 指定要轉錄的檔案（使用專案目錄下的測試檔案）
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(script_dir, "video1.mp3")
     
     # 檢查檔案是否存在
     if not os.path.exists(file_path):
-        print(f"❌ 錯誤: 找不到檔案 {file_path}")
+        print(f"[ERROR] 錯誤: 找不到檔案 {file_path}")
         print(f"請確認檔案路徑是否正確")
         return
     

@@ -9,25 +9,14 @@ import json
 from detect_device import get_optimal_device, get_device_info
 
 
-def _load_user_settings():
-    """載入使用者配置（如果存在）"""
-    settings_file = "whisper_settings.json"
-    if os.path.exists(settings_file):
-        try:
-            with open(settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-                print(f"✅ 已載入使用者配置: {settings_file}")
-                return settings
-        except Exception as e:
-            print(f"⚠️ 載入配置失敗: {e}，使用預設值")
-    return {}
+from config_manager import ConfigManager
 
 
 class Config:
     """Whisper 應用程式配置"""
     
-    # 載入使用者自訂配置
-    _user_settings = _load_user_settings()
+    # 載入使用者自訂配置 (透過 ConfigManager)
+    _user_settings = ConfigManager.load_settings()
     
     # === 裝置配置 ===
     # 自動偵測最佳運算裝置
@@ -58,9 +47,11 @@ class Config:
     VAD_SPEECH_PAD_MS = _user_settings.get("vad_speech_pad_ms", 400)  # 語音片段前後填充時間
     
     # === 即時轉錄設定 ===
-    SILENCE_THRESHOLD = 0.01
-    SILENCE_DURATION = 1.0
-    TRANSCRIBE_INTERVAL = 0.5
+    # 靜音閾值：提高此值可過濾背景噪音（如電腦風扇聲）
+    # 建議值：0.02-0.05 之間，太高會漏掉小聲的語音
+    SILENCE_THRESHOLD = 0.05  # 提高閾值以過濾背景噪音
+    SILENCE_DURATION = 1.0  # 靜音持續時間（秒）
+    TRANSCRIBE_INTERVAL = 0.5  # 即時轉錄間隔（秒）
     LOG_FILE = "transcription_log.txt"
     
     # === 模型選項 ===
@@ -77,12 +68,17 @@ class Config:
     }
     
     @classmethod
-    def get_vad_parameters(cls):
+    def get_vad_parameters(cls) -> dict[str, float | int]:
         """
         取得完整的 VAD 參數字典
         
         Returns:
-            dict: VAD 參數字典
+            dict[str, float | int]: VAD 參數字典，包含：
+                - min_silence_duration_ms (int): 最小靜音時長（毫秒）
+                - threshold (float): 語音偵測閾值 (0.0-1.0)
+                - min_speech_duration_ms (int): 最小語音時長（毫秒）
+                - max_speech_duration_s (float): 最大語音時長（秒）
+                - speech_pad_ms (int): 語音前後填充時間（毫秒）
         """
         return {
             "min_silence_duration_ms": cls.VAD_MIN_SILENCE_MS,

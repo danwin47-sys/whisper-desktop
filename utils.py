@@ -4,6 +4,7 @@
 包含 SRT 格式化、片段切分等工具函數
 """
 import datetime
+from constants import PAUSE_PUNCTUATION, MIN_SEGMENT_DURATION, MAX_SEGMENT_DURATION
 
 
 def format_timestamp(seconds: float):
@@ -17,14 +18,14 @@ def format_timestamp(seconds: float):
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def split_into_segments(words, min_duration=2.0, max_duration=8.0):
+def split_into_segments(words, min_duration=MIN_SEGMENT_DURATION, max_duration=MAX_SEGMENT_DURATION):
     """
     將單字列表重新組合成 2~8 秒的片段
     
     Args:
         words: list of dict or object with 'start', 'end', 'word'
-        min_duration: 最小片段長度（秒）
-        max_duration: 最大片段長度（秒）
+        min_duration: 最小片段長度（秒），預設值來自 constants.MIN_SEGMENT_DURATION
+        max_duration: 最大片段長度（秒），預設值來自 constants.MAX_SEGMENT_DURATION
         
     Returns:
         list: 切分後的片段列表
@@ -47,7 +48,7 @@ def split_into_segments(words, min_duration=2.0, max_duration=8.0):
         if len(current_segment) > 1:
             # 簡單判斷：標點符號結尾 (Whisper 的 word 通常包含標點)
             text = word.word.strip()
-            if text.endswith(('，', '。', '？', '！', ',', '.', '?', '!')):
+            if text.endswith(PAUSE_PUNCTUATION):
                 is_pause = True
         
         # 強制切分條件
