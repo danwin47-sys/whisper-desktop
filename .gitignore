@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+error_log.txt
+transcription_log.txt
+transcription_stats.csv
+*.mp3
+*.mp4
+*.wav
+*.srt
+whisper_settings.json
+.vscode/
